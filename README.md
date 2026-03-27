@@ -2,14 +2,16 @@
 
 This repository contains a dockerized multi-service prototype for:
 
-- scraping static and JavaScript-rendered websites
-- translating user intent into structured scraper jobs with the OpenAI API
-- storing results in an MCP-oriented storage layer
+- opening JavaScript-rendered retail pages in a real browser
+- switching to a cleaner offer view when available
+- capturing flyer screenshots and sending them to OpenAI Vision
+- translating user intent into structured scraper jobs
+- storing extracted records in an MCP-oriented storage layer
 - serving a user-facing application for supermarket offers and fuel price comparison
 
 ## Stack
 
-- `scraper-service`: FastAPI + Playwright + BeautifulSoup
+- `scraper-service`: FastAPI + Playwright + OpenAI Python SDK
 - `data-analytics-server`: FastAPI + Jinja + OpenAI Python SDK
 - `application-server`: Next.js App Router
 - `orchestration`: Docker Compose
@@ -20,17 +22,21 @@ This repository contains a dockerized multi-service prototype for:
 
 - Receives structured scraping jobs from the Data-Analytics Server
 - Loads pages with Playwright to support JavaScript-rendered content
-- Filters extracted text blocks using provided keywords
-- Returns structured scrape matches with relevance scores
+- Tries to accept cookie dialogs, close blocking overlays, and switch to the `Angebote` view
+- Scrolls through long offer pages before screenshot capture so lazy-loaded flyer content is included
+- Captures stitched screenshots and splits them into segments
+- Sends screenshot segments to OpenAI Vision for structured offer extraction
+- Returns structured scrape matches plus detailed debug diagnostics
 
 ### 2. Data-Analytics Server
 
 - Provides a web GUI for submitting scraping requests
 - Converts natural-language requests into structured scraper jobs
 - Uses OpenAI when `OPENAI_API_KEY` is configured
-- Falls back to deterministic keyword extraction if no API key is present
+- Falls back to deterministic keyword extraction for job generation if no API key is present
 - Stores results in a JSON-backed MCP-style storage layer
 - Exposes aggregated application data APIs
+- Serves scraper debug screenshots and shows diagnostics in the web UI
 
 ### 3. Application Server
 
@@ -45,6 +51,7 @@ This repository contains a dockerized multi-service prototype for:
 .
 ├── application-server
 ├── data-analytics-server
+├── data
 ├── scraper-service
 ├── shared
 │   └── schemas
@@ -54,7 +61,7 @@ This repository contains a dockerized multi-service prototype for:
 
 ## Environment
 
-Copy the example environment file if you want local changes:
+Docker Compose reads `.env`, so create it from the example first:
 
 ```bash
 cp .env.example .env
@@ -62,9 +69,11 @@ cp .env.example .env
 
 Important variables:
 
-- `OPENAI_API_KEY`: optional, enables OpenAI-based job generation
+- `OPENAI_API_KEY`: required for screenshot-to-text scraping and optional for analytics-side job generation
+- `OPENAI_VISION_MODEL`: model used by the scraper for image understanding
 - `SCRAPER_SERVICE_URL`: internal URL used by the Data-Analytics Server
 - `MCP_STORE_PATH`: JSON storage file used by the MCP-style store
+- `SCRAPER_DEBUG_DIR`: shared directory for debug screenshots
 - `DATA_ANALYTICS_URL`: internal URL used by the Application Server
 - `NEXT_PUBLIC_DATA_ANALYTICS_URL`: browser-facing URL for frontend references
 
@@ -72,6 +81,13 @@ Important variables:
 
 ```bash
 docker compose up --build
+```
+
+If you want to force a clean rebuild after scraper changes:
+
+```bash
+docker compose build --no-cache scraper-service data-analytics-server
+docker compose up scraper-service data-analytics-server application-server
 ```
 
 Available services after startup:
@@ -86,7 +102,7 @@ Available services after startup:
 2. Enter a target URL such as:
 
 ```text
-https://example.com/offers
+https://www.kaufda.de/contentViewer/static/example
 ```
 
 3. Describe the information you want, for example:
@@ -96,7 +112,25 @@ Find supermarket promotions, product names, prices, discounts, and validity hint
 ```
 
 4. Submit the request
-5. Open the Application Server at `http://localhost:3000` to see stored supermarket offers and fuel-price comparison data
+5. Check the debug panels in the Data-Analytics UI:
+   - `Scraper Debug`
+   - `OpenAI Vision Debug`
+6. Open the Application Server at `http://localhost:3000` to see stored supermarket offers and fuel-price comparison data
+
+## Current scraper workflow
+
+The scraper currently follows this flow:
+
+1. Open the target page in Playwright
+2. Try to accept cookie dialogs and close blocking overlays
+3. Try to switch into a clearer offers view such as `Angebote`
+4. Preload long pages by scrolling until the document height stabilizes
+5. Capture a stitched full-page screenshot
+6. Split the stitched image into overlapping segments
+7. Send the segment images to OpenAI Vision
+8. Parse the returned offer objects into the MCP-oriented store format
+
+This repository is currently optimized for flyer-style retail pages rather than generic DOM scraping.
 
 ## API overview
 
@@ -117,7 +151,9 @@ Find supermarket promotions, product names, prices, discounts, and validity hint
 
 - The MCP server is implemented here as a pragmatic JSON-backed MCP-oriented storage layer to keep the prototype runnable and easy to understand.
 - Fuel station prices are currently seeded sample data so the Application Server can demonstrate comparisons immediately.
-- The scraper currently uses keyword scoring over extracted text blocks. This is designed to be extendable with domain-specific parsers later.
+- The scraper currently relies on screenshot-based extraction through OpenAI Vision rather than DOM/OCR/JSON-LD parsing.
+- Keywords are used as hints, not as hard filters.
+- Debug screenshots are written to `./data/scraper-debug` and surfaced in the Data-Analytics UI.
 - The Data-Analytics Server intentionally translates user intent into a structured internal job instead of sending the raw user prompt to the scraper.
 
 ## Next recommended improvements
@@ -126,4 +162,4 @@ Find supermarket promotions, product names, prices, discounts, and validity hint
 - Add an actual MCP transport layer if full MCP interoperability is needed
 - Add async job queues and background workers
 - Add authentication and tenant separation
-- Add domain-specific parsers for supermarket and fuel data
+- Add stronger domain-specific logic for retailer tabs, cookie managers, and flyer segmentation
