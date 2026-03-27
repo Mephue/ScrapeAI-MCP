@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+  scraper-service:
+    build:
+      context: .
+      dockerfile: scraper-service/Dockerfile
+    env_file:
+      - .env.example
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./shared:/app/shared
+
+  data-analytics-server:
+    build:
+      context: .
+      dockerfile: data-analytics-server/Dockerfile
+    env_file:
+      - .env.example
+    environment:
+      SCRAPER_SERVICE_URL: http://scraper-service:8001
+      MCP_STORE_PATH: /data/mcp_store.json
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+      - ./shared:/app/shared
+    depends_on:
+      - scraper-service
+
+  application-server:
+    build:
+      context: .
+      dockerfile: application-server/Dockerfile
+    env_file:
+      - .env.example
+    environment:
+      DATA_ANALYTICS_URL: http://data-analytics-server:8000
+      NEXT_PUBLIC_DATA_ANALYTICS_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - data-analytics-server

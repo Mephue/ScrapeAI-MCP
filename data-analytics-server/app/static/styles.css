@@ -1,0 +1,145 @@
+:root {
+  color-scheme: light;
+  --bg: #f3efe7;
+  --panel: rgba(255, 255, 255, 0.82);
+  --border: rgba(24, 42, 61, 0.12);
+  --text: #182a3d;
+  --muted: #556575;
+  --accent: #116466;
+  --accent-strong: #0b4f52;
+  --shadow: 0 24px 80px rgba(17, 100, 102, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top right, rgba(17, 100, 102, 0.18), transparent 30%),
+    linear-gradient(180deg, #f7f3ec 0%, var(--bg) 100%);
+}
+
+.shell {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 48px 20px 64px;
+}
+
+.hero {
+  padding: 24px 0 32px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  font-size: clamp(2.2rem, 4vw, 4rem);
+  line-height: 1.05;
+  max-width: 12ch;
+  margin-bottom: 12px;
+}
+
+.lede {
+  max-width: 60ch;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  padding: 24px;
+  backdrop-filter: blur(14px);
+  margin-bottom: 24px;
+}
+
+form {
+  display: grid;
+  gap: 18px;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+  font-weight: 600;
+}
+
+input,
+textarea,
+button,
+pre {
+  font: inherit;
+}
+
+input,
+textarea {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid rgba(24, 42, 61, 0.16);
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+button {
+  justify-self: start;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  color: white;
+  padding: 13px 22px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+}
+
+.section-header p {
+  color: var(--muted);
+}
+
+pre {
+  background: #12202d;
+  color: #eaf7fa;
+  border-radius: 18px;
+  padding: 16px;
+  overflow-x: auto;
+  min-height: 200px;
+}
+
+@media (max-width: 720px) {
+  .shell {
+    padding: 32px 16px 48px;
+  }
+
+  .panel {
+    padding: 18px;
+  }
+
+  .section-header {
+    display: block;
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ScraperJob",
+  "type": "object",
+  "required": [
+    "job_id",
+    "target_url",
+    "user_intent",
+    "keywords",
+    "extraction_instructions",
+    "expected_output"
+  ],
+  "properties": {
+    "job_id": {
+      "type": "string"
+    },
+    "target_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "user_intent": {
+      "type": "string"
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "extraction_instructions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "expected_output": {
+      "type": "object",
+      "required": [
+        "format",
+        "fields"
+      ],
+      "properties": {
+        "format": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
+

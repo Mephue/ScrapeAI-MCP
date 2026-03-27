@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Data Analytics Server</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Data Analytics Server</p>
+        <h1>Generate structured scraping jobs from natural language</h1>
+        <p class="lede">
+          Submit a target URL and describe the information you need. The server
+          translates your request into a scraper job, executes it, and stores the
+          result in an MCP-oriented data store.
+        </p>
+      </section>
+
+      <section class="panel">
+        <form id="scrape-form">
+          <label>
+            <span>Target URL</span>
+            <input id="target_url" name="target_url" type="url" value="{{ sample_url }}" required />
+          </label>
+          <label>
+            <span>Information request</span>
+            <textarea
+              id="user_prompt"
+              name="user_prompt"
+              rows="5"
+              required
+            >Find supermarket promotions, relevant product names, prices, and validity hints. Prioritize discount-related information.</textarea>
+          </label>
+          <button type="submit">Create and run scraping job</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="section-header">
+          <h2>Response</h2>
+          <p>Structured job and scrape result preview</p>
+        </div>
+        <pre id="result-box">Waiting for submission...</pre>
+      </section>
+    </main>
+
+    <script>
+      const form = document.getElementById("scrape-form");
+      const resultBox = document.getElementById("result-box");
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        resultBox.textContent = "Running scraper workflow...";
+
+        const payload = {
+          target_url: document.getElementById("target_url").value,
+          user_prompt: document.getElementById("user_prompt").value,
+        };
+
+        try {
+          const response = await fetch("/api/jobs/submit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json();
+          resultBox.textContent = JSON.stringify(data, null, 2);
+        } catch (error) {
+          resultBox.textContent = `Workflow failed: ${error}`;
+        }
+      });
+    </script>
+  </body>
+</html>
+

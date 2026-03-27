@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ScrapeResult",
+  "type": "object",
+  "required": [
+    "job_id",
+    "source_url",
+    "scraped_at",
+    "page_title",
+    "matches",
+    "diagnostics"
+  ],
+  "properties": {
+    "job_id": {
+      "type": "string"
+    },
+    "source_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "scraped_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "page_title": {
+      "type": "string"
+    },
+    "matches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "text",
+          "matched_keywords",
+          "relevance_score"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "matched_keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "relevance_score": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "object"
+    }
+  }
+}
+
