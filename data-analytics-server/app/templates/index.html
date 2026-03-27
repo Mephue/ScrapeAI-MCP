@@ -115,7 +115,19 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           });
-          const data = await response.json();
+          const responseText = await response.text();
+          let data;
+          try {
+            data = JSON.parse(responseText);
+          } catch (parseError) {
+            resultBox.textContent = responseText || `Workflow failed: ${parseError}`;
+            debugScreenshotCount.textContent = "n/a";
+            debugVisionOffers.textContent = "n/a";
+            debugWorkflow.textContent = "n/a";
+            debugScreenshot.textContent = "n/a";
+            visionDebugBox.textContent = "n/a";
+            return;
+          }
           resultBox.textContent = JSON.stringify(data, null, 2);
           const diagnostics = data?.result?.diagnostics ?? {};
           debugScreenshotCount.textContent = diagnostics.screenshot_count ?? "n/a";

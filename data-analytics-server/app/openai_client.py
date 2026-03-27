@@ -76,10 +76,26 @@ def generate_scraper_job(target_url: str, user_prompt: str) -> ScraperJob:
         text={"format": {"type": "json_object"}},
     )
     payload = json.loads(response.output_text)
+    expected_output_payload = payload.get("expected_output", {})
+    if not isinstance(expected_output_payload, dict):
+        expected_output_payload = {
+            "format": "json",
+            "fields": ["product_name", "price", "discount", "validity", "retailer", "source_text"],
+        }
+    keywords = payload.get("keywords", [])
+    if not isinstance(keywords, list):
+        keywords = []
+    extraction_instructions = payload.get("extraction_instructions", [])
+    if not isinstance(extraction_instructions, list):
+        extraction_instructions = [
+            "Use keywords only as hints, not as strict filters.",
+            "Prefer product names, prices, discount labels, validity dates, and retailer names visible in the flyer.",
+            "Expect that the website language may differ from the user's language.",
+        ]
     return ScraperJob(
         target_url=target_url,
         user_intent=payload.get("user_intent", user_prompt),
-        keywords=payload.get("keywords", []),
-        extraction_instructions=payload.get("extraction_instructions", []),
-        expected_output=ExpectedOutput(**payload.get("expected_output", {})),
+        keywords=keywords,
+        extraction_instructions=extraction_instructions,
+        expected_output=ExpectedOutput(**expected_output_payload),
     )

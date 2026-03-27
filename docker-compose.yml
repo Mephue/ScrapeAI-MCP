@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: scraper-service/Dockerfile
     env_file:
-      - .env.example
+      - .env
     ports:
       - "8001:8001"
     volumes:
@@ -18,7 +18,7 @@ services:
       context: .
       dockerfile: data-analytics-server/Dockerfile
     env_file:
-      - .env.example
+      - .env
     environment:
       SCRAPER_SERVICE_URL: http://scraper-service:8001
       MCP_STORE_PATH: /data/mcp_store.json
@@ -36,7 +36,7 @@ services:
       context: .
       dockerfile: application-server/Dockerfile
     env_file:
-      - .env.example
+      - .env
     environment:
       DATA_ANALYTICS_URL: http://data-analytics-server:8000
       NEXT_PUBLIC_DATA_ANALYTICS_URL: http://localhost:8000
