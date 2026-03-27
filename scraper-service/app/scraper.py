@@ -6,14 +6,25 @@ import json
 import os
 import re
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from openai import OpenAI
+from PIL import Image
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 
 from app.models import ScrapeMatch, ScrapeResult, ScraperJob
+
+KEYWORD_ALIASES = {
+    "price": {"preis", "preise", "price", "prices"},
+    "offer": {"angebot", "angebote", "offer", "offers", "prospekt", "flyer"},
+    "discount": {"rabatt", "aktion", "discount", "sale", "deal"},
+    "validity": {"gueltig", "gültig", "validity", "valid", "ab", "bis"},
+    "product": {"produkt", "produkte", "product", "products", "artikel"},
+}
+PRICE_REGEX = re.compile(r"(?:€\s?\d{1,3}[.,]\d{2}|\d{1,3}[.,]\d{2}\s?(?:€|eur)?)", re.IGNORECASE)
 
 
 class ScrapeEmptyError(Exception):
@@ -49,6 +60,205 @@ async def _dismiss_common_banners(page) -> None:
             continue
 
 
+async def _accept_cookie_modal(page) -> bool:
+    selectors = (
+        'button:has-text("Akzeptiere alle")',
+        'button:has-text("Alle akzeptieren")',
+        'button:has-text("Accept all")',
+        'button:has-text("Akzeptieren")',
+        'button:has-text("Zustimmen")',
+        '[data-testid*="consent"] button',
+        '[id*="consent"] button',
+        '[class*="consent"] button',
+        '[aria-label*="consent" i] button',
+    )
+    for frame in page.frames:
+        for selector in selectors:
+            try:
+                button = frame.locator(selector).first
+                if await button.count() and await button.is_visible(timeout=1000):
+                    await button.click(timeout=3000, force=True)
+                    await page.wait_for_timeout(1500)
+                    return True
+            except Exception:
+                continue
+
+        try:
+            clicked = await frame.evaluate(
+                """
+                () => {
+                  const candidates = Array.from(document.querySelectorAll('button, [role="button"], a, div, span'));
+                  const target = candidates.find((element) => {
+                    const text = element.textContent?.trim().toLowerCase() || '';
+                    return ['akzeptiere alle', 'alle akzeptieren', 'accept all', 'akzeptieren', 'zustimmen']
+                      .some((label) => text === label || text.includes(label));
+                  });
+                  if (!target) return false;
+                  target.click();
+                  return true;
+                }
+                """
+            )
+            if clicked:
+                await page.wait_for_timeout(1500)
+                return True
+        except Exception:
+            continue
+    return False
+
+
+async def _close_blocking_overlays(page) -> bool:
+    closed = False
+    selectors = (
+        'button[aria-label*="close" i]',
+        'button[aria-label*="schließen" i]',
+        '[role="dialog"] button:has-text("×")',
+        '[role="dialog"] button:has-text("✕")',
+        '[role="dialog"] button:has-text("Schließen")',
+        '[role="dialog"] button:has-text("Close")',
+        'button:has-text("Später")',
+        'button:has-text("Nein danke")',
+        '[data-testid*="close"]',
+        '[class*="close"]',
+    )
+    for frame in page.frames:
+        for selector in selectors:
+            try:
+                button = frame.locator(selector).first
+                if await button.count() and await button.is_visible(timeout=800):
+                    await button.click(timeout=2000, force=True)
+                    await page.wait_for_timeout(500)
+                    closed = True
+            except Exception:
+                continue
+
+        try:
+            clicked = await frame.evaluate(
+                """
+                () => {
+                  const candidates = Array.from(document.querySelectorAll('button, [role="button"], div, span'));
+                  const target = candidates.find((element) => {
+                    const text = element.textContent?.trim() || '';
+                    const aria = element.getAttribute('aria-label') || '';
+                    return text === '×' || text === '✕' || /close|schließen/i.test(text) || /close|schließen/i.test(aria);
+                  });
+                  if (!target) return false;
+                  target.click();
+                  return true;
+                }
+                """
+            )
+            if clicked:
+                await page.wait_for_timeout(500)
+                closed = True
+            continue
+        except Exception:
+            continue
+    return closed
+
+
+async def _open_angebote_view(page) -> bool:
+    selectors = (
+        '[data-testid="tabs"] button:has-text("Angebote")',
+        '[data-testid="tabs"] *:has-text("Angebote")',
+        'button:has-text("Angebote")',
+        '[role="tab"]:has-text("Angebote")',
+        'a:has-text("Angebote")',
+        'text="Angebote"',
+    )
+    for selector in selectors:
+        try:
+            target = page.locator(selector).first
+            if await target.count() and await target.is_visible(timeout=1500):
+                await target.click(timeout=3000, force=True)
+                await page.wait_for_timeout(1600)
+                return True
+        except Exception:
+            continue
+
+    try:
+        clicked = await page.evaluate(
+            """
+            () => {
+              const elements = Array.from(document.querySelectorAll('button, a, [role="tab"], div, span'));
+              const match = elements.find((element) => element.textContent?.trim() === 'Angebote');
+              if (!match) return false;
+              const clickable = match.closest('button, a, [role="tab"], [tabindex]') || match;
+              clickable.click();
+              return true;
+            }
+            """
+        )
+        if clicked:
+            await page.wait_for_timeout(1600)
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
+async def _prepare_offer_view(page) -> dict[str, object]:
+    diagnostics: dict[str, object] = {
+        "cookie_accepted": False,
+        "overlay_closed": False,
+        "angebote_clicked": False,
+    }
+
+    diagnostics["cookie_accepted"] = await _accept_cookie_modal(page)
+    diagnostics["overlay_closed"] = await _close_blocking_overlays(page)
+    diagnostics["angebote_clicked"] = await _open_angebote_view(page)
+    if not diagnostics["angebote_clicked"]:
+        diagnostics["overlay_closed"] = await _close_blocking_overlays(page) or bool(diagnostics["overlay_closed"])
+        diagnostics["angebote_clicked"] = await _open_angebote_view(page)
+
+    if diagnostics["angebote_clicked"]:
+        for selector in (
+            '[data-testid="premium-panel-offers"]',
+            '[href*="productId"]',
+            'text="UVP"',
+        ):
+            try:
+                await page.locator(selector).first.wait_for(state="visible", timeout=8000)
+                diagnostics["matched_offer_selector"] = selector
+                break
+            except Exception:
+                continue
+
+    await page.wait_for_timeout(1200)
+    return diagnostics
+
+
+async def _load_full_offer_listing(page) -> dict[str, object]:
+    diagnostics: dict[str, object] = {"preload_scroll_steps": 0}
+    try:
+        total_height = await page.evaluate("() => document.body.scrollHeight")
+    except Exception:
+        return diagnostics
+
+    viewport_height = 1400
+    current = 0
+    max_steps = 18
+    while current < total_height and diagnostics["preload_scroll_steps"] < max_steps:
+        try:
+            await page.evaluate("(y) => window.scrollTo(0, y)", current)
+            await page.wait_for_timeout(500)
+            current += viewport_height
+            diagnostics["preload_scroll_steps"] = int(diagnostics["preload_scroll_steps"]) + 1
+            total_height = await page.evaluate("() => document.body.scrollHeight")
+        except Exception:
+            break
+
+    try:
+        await page.evaluate("() => window.scrollTo(0, 0)")
+        await page.wait_for_timeout(900)
+    except Exception:
+        pass
+
+    diagnostics["final_scroll_height"] = total_height
+    return diagnostics
+
+
 async def _capture_debug_screenshot(page, job_id: str) -> str | None:
     try:
         base_dir = Path(os.getenv("SCRAPER_DEBUG_DIR", "/data/scraper-debug"))
@@ -63,30 +273,110 @@ async def _capture_debug_screenshot(page, job_id: str) -> str | None:
 async def _capture_segment_screenshots(page, job_id: str) -> tuple[list[bytes], list[str]]:
     base_dir = Path(os.getenv("SCRAPER_DEBUG_DIR", "/data/scraper-debug"))
     base_dir.mkdir(parents=True, exist_ok=True)
+    full_page_path = base_dir / f"{job_id}-stitched-source.png"
+    await page.screenshot(path=str(full_page_path), full_page=True)
+    full_page_bytes = _crop_blank_space(full_page_path.read_bytes())
+    full_page_path.write_bytes(full_page_bytes)
+    return _split_cropped_image(full_page_bytes, base_dir, job_id)
 
-    viewport_height = page.viewport_size["height"] if page.viewport_size else 1600
-    scroll_height = await page.evaluate(
-        "() => Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)"
+
+def _crop_blank_space(image_bytes: bytes) -> bytes:
+    try:
+        image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    except Exception:
+        return image_bytes
+
+    width, height = image.size
+    pixels = image.load()
+    top, bottom = height, 0
+
+    for y in range(height):
+        row_has_content = False
+        for x in range(width):
+            red, green, blue = pixels[x, y]
+            if red < 245 or green < 245 or blue < 245:
+                row_has_content = True
+                break
+        if row_has_content:
+            top = min(top, y)
+            bottom = max(bottom, y)
+
+    if bottom <= top:
+        return image_bytes
+
+    padding = 8
+    cropped = image.crop(
+        (
+            0,
+            max(0, top - padding),
+            width,
+            min(height, bottom + padding),
+        )
     )
-    screenshot_positions: list[int] = []
-    step = max(int(viewport_height * 0.85), 900)
-    current = 0
-    while current < scroll_height and len(screenshot_positions) < 5:
-        screenshot_positions.append(current)
-        current += step
-    if not screenshot_positions:
-        screenshot_positions = [0]
+    buffer = BytesIO()
+    cropped.save(buffer, format="PNG")
+    return buffer.getvalue()
 
-    image_bytes: list[bytes] = []
+
+def _split_cropped_image(image_bytes: bytes, base_dir: Path, job_id: str) -> tuple[list[bytes], list[str]]:
+    try:
+        image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    except Exception:
+        return [image_bytes], []
+
+    width, height = image.size
+    segment_height = 1700
+    overlap = 220
+    top = 0
+    index = 1
     image_paths: list[str] = []
-    for index, position in enumerate(screenshot_positions, start=1):
-        await page.evaluate("position => window.scrollTo(0, position)", position)
-        await page.wait_for_timeout(900)
+    image_bytes_list: list[bytes] = []
+
+    while top < height:
+        bottom = _find_segment_break(image, top, segment_height, overlap)
+        segment = image.crop((0, top, width, bottom))
+        buffer = BytesIO()
+        segment.save(buffer, format="PNG")
+        segment_bytes = buffer.getvalue()
         path = base_dir / f"{job_id}-segment-{index}.png"
-        await page.screenshot(path=str(path), full_page=False)
+        path.write_bytes(segment_bytes)
         image_paths.append(str(path))
-        image_bytes.append(path.read_bytes())
-    return image_bytes, image_paths
+        image_bytes_list.append(segment_bytes)
+        if bottom >= height:
+            break
+        top = bottom - overlap
+        index += 1
+
+    return image_bytes_list, image_paths
+
+
+def _find_segment_break(image: Image.Image, top: int, segment_height: int, overlap: int) -> int:
+    width, height = image.size
+    target_bottom = min(height, top + segment_height)
+    if target_bottom >= height:
+        return height
+
+    pixels = image.load()
+    search_start = max(top + 900, target_bottom - 260)
+    search_end = min(height - 1, target_bottom + 260)
+
+    best_y = target_bottom
+    best_score = float("inf")
+
+    for y in range(search_start, search_end):
+        non_light_pixels = 0
+        sample_step = max(1, width // 120)
+        for x in range(0, width, sample_step):
+            red, green, blue = pixels[x, y]
+            if red < 240 or green < 240 or blue < 240:
+                non_light_pixels += 1
+        if non_light_pixels < best_score:
+            best_score = non_light_pixels
+            best_y = y
+
+    if best_y <= top + overlap:
+        return min(height, target_bottom)
+    return best_y
 
 
 def _keyword_hits(text: str, keywords: list[str]) -> list[str]:
@@ -146,7 +436,8 @@ def _extract_offers_from_openai(
                 f"User intent: {user_intent}\n"
                 f"Retailer hint: {retailer_focus or 'unknown'}\n"
                 f"Keywords: {', '.join(keywords)}\n"
-                "Read all screenshots and translate the flyer into structured text."
+                "Read all screenshots and translate the flyer into structured text. "
+                "If you can clearly see a product and a price or discount badge, include it even if some fine print is unreadable."
             ),
         }
     ]
@@ -159,7 +450,27 @@ def _extract_offers_from_openai(
             }
         )
 
-    response = client.responses.create(
+    system_prompt = (
+        "You are extracting offer data from supermarket flyer screenshots. "
+        "The flyer language may be German even if the user request is English. "
+        "Read the screenshots carefully and extract visible offers aggressively. "
+        "Do not return an empty list if any product/price pair or discount badge is visible. "
+        "Partial offers are acceptable. "
+        "Prices and discount labels are especially important. "
+        "Return JSON only with a top-level key named offers. "
+        "Each offer must be an object with keys: "
+        "product_name, price, discount, validity, retailer, source_text. "
+        "Use empty strings for missing fields. "
+        "German retail words to pay attention to include: Angebot, Angebote, Preis, Rabatt, Gültig, Ab, Bis, XXL, kg-Preis, Stück. "
+        "Examples of good outputs: "
+        "{\"product_name\":\"Erdbeeren\",\"price\":\"1.49\",\"discount\":\"-50%\",\"validity\":\"Ab Mo. 23.3. bis Sa. 28.3.\",\"retailer\":\"Lidl\",\"source_text\":\"Erdbeeren ... -50% 1.49\"} "
+        "{\"product_name\":\"Deutsche rote Äpfel\",\"price\":\"2.22\",\"discount\":\"3-kg-Netz\",\"validity\":\"Ab Mo. 23.3. bis Sa. 28.3.\",\"retailer\":\"Lidl\",\"source_text\":\"Deutsche rote Äpfel 3-kg-Netz 2.22\"} "
+        "Every returned offer should include a visible price. If you cannot find a price, skip that offer. "
+        "Ignore only pure branding, navigation, legal footer text, and app UI text."
+    )
+
+    def call_openai(extra_user_text: str) -> str:
+        response = client.responses.create(
         model=model,
         input=[
             {
@@ -167,57 +478,78 @@ def _extract_offers_from_openai(
                 "content": [
                     {
                         "type": "input_text",
-                        "text": (
-                            "You are extracting data from flyer screenshots. "
-                            "Return JSON only with a top-level key named offers. "
-                            "Each offer must be an object with keys: "
-                            "product_name, price, discount, validity, retailer, source_text. "
-                            "Use empty strings for missing fields. "
-                            "Only include real visible offers from the flyer."
-                        ),
+                        "text": system_prompt,
                     }
                 ],
             },
             {
                 "role": "user",
-                "content": user_content,
+                "content": user_content
+                + [
+                    {
+                        "type": "input_text",
+                        "text": extra_user_text,
+                    }
+                ],
             },
         ],
         text={"format": {"type": "json_object"}},
     )
+        return response.output_text
 
-    raw_response = response.output_text[:12000]
+    raw_response_full = call_openai(
+        "Extract all visible offers. Prefer returning partial structured offers over returning an empty list."
+    )
+
     try:
-        payload = json.loads(response.output_text)
+        payload = json.loads(raw_response_full)
     except json.JSONDecodeError as exc:
         raise ScrapeEmptyError(
             "OpenAI Vision returned a non-JSON response for the flyer screenshots.",
-            diagnostics={"vision_raw_response": raw_response, "exception_type": exc.__class__.__name__},
+            diagnostics={"vision_raw_response": raw_response_full[:12000], "exception_type": exc.__class__.__name__},
         ) from exc
 
     offers = payload.get("offers", [])
+    if isinstance(offers, list) and len(offers) == 0:
+        retry_response = call_openai(
+            "Your previous answer was empty. Retry more aggressively. "
+            "Return every visible offer candidate. "
+            "If exact prices are hard to read, still extract product_name plus approximate visible price or discount text. "
+            "Look especially for large red or yellow price badges and percent discount labels. "
+            "Only include offers where a price is visible. "
+            "Do not return an empty list unless there are truly no visible products."
+        )
+        raw_response_full = retry_response
+        try:
+            payload = json.loads(retry_response)
+            offers = payload.get("offers", [])
+        except json.JSONDecodeError:
+            offers = []
     if not isinstance(offers, list):
         raise ScrapeEmptyError(
             "OpenAI Vision did not return an offers list.",
-            diagnostics={"vision_raw_response": raw_response},
+            diagnostics={"vision_raw_response": raw_response_full[:12000]},
         )
 
     normalized_offers: list[dict[str, str]] = []
     for offer in offers:
         if not isinstance(offer, dict):
             continue
+        source_text = _normalize_whitespace(str(offer.get("source_text", "")))
+        recovered_price_match = PRICE_REGEX.search(source_text)
+        recovered_price = _normalize_whitespace(recovered_price_match.group(0)) if recovered_price_match else ""
         normalized_offer = {
             "product_name": _normalize_whitespace(str(offer.get("product_name", ""))),
-            "price": _normalize_whitespace(str(offer.get("price", ""))),
+            "price": _normalize_whitespace(str(offer.get("price", ""))) or recovered_price,
             "discount": _normalize_whitespace(str(offer.get("discount", ""))),
             "validity": _normalize_whitespace(str(offer.get("validity", ""))),
             "retailer": _normalize_whitespace(str(offer.get("retailer", retailer_focus or ""))),
-            "source_text": _normalize_whitespace(str(offer.get("source_text", ""))),
+            "source_text": source_text,
         }
-        if normalized_offer["product_name"] or normalized_offer["price"] or normalized_offer["source_text"]:
+        if normalized_offer["price"] and (normalized_offer["product_name"] or normalized_offer["source_text"]):
             normalized_offers.append(normalized_offer)
 
-    return normalized_offers, raw_response
+    return normalized_offers, raw_response_full[:12000]
 
 
 async def run_scrape(job: ScraperJob) -> ScrapeResult:
@@ -241,6 +573,8 @@ async def run_scrape(job: ScraperJob) -> ScrapeResult:
         try:
             await page.goto(str(job.target_url), wait_until="domcontentloaded", timeout=90000)
             await _dismiss_common_banners(page)
+            interaction_diagnostics = await _prepare_offer_view(page)
+            preload_diagnostics = await _load_full_offer_listing(page)
             try:
                 await page.wait_for_load_state("networkidle", timeout=15000)
             except PlaywrightTimeoutError:
@@ -281,6 +615,8 @@ async def run_scrape(job: ScraperJob) -> ScrapeResult:
         "page_vision_offer_count": len(offers),
         "vision_raw_response": raw_response,
         "vision_parsed_offers": offers[:20],
+        **interaction_diagnostics,
+        **preload_diagnostics,
     }
 
     if not matches:
@@ -297,10 +633,3 @@ async def run_scrape(job: ScraperJob) -> ScrapeResult:
         matches=matches[:20],
         diagnostics=diagnostics,
     )
-KEYWORD_ALIASES = {
-    "price": {"preis", "preise", "price", "prices"},
-    "offer": {"angebot", "angebote", "offer", "offers", "prospekt", "flyer"},
-    "discount": {"rabatt", "aktion", "discount", "sale", "deal"},
-    "validity": {"gueltig", "gültig", "validity", "valid", "ab", "bis"},
-    "product": {"produkt", "produkte", "product", "products", "artikel"},
-}

@@ -179,6 +179,34 @@ pre {
   background: white;
 }
 
+.debug-segment-gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.debug-segment-card {
+  margin: 0;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(24, 42, 61, 0.1);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.debug-segment-image {
+  display: block;
+  width: 100%;
+  background: white;
+}
+
+.debug-segment-caption {
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 @media (max-width: 720px) {
   .shell {
     padding: 32px 16px 48px;
@@ -193,6 +221,10 @@ pre {
   }
 
   .debug-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .debug-segment-gallery {
     grid-template-columns: 1fr;
   }
 }

@@ -67,7 +67,7 @@
             <span class="debug-label">debug_screenshot</span>
             <strong id="debug-screenshot">n/a</strong>
             <a id="debug-screenshot-link" class="debug-link" href="#" target="_blank" rel="noreferrer" hidden>Open screenshot</a>
-            <img id="debug-screenshot-image" class="debug-image" alt="Scraper debug screenshot" hidden />
+            <div id="debug-segment-gallery" class="debug-segment-gallery" hidden></div>
           </article>
         </div>
       </section>
@@ -89,8 +89,57 @@
       const debugWorkflow = document.getElementById("debug-workflow");
       const debugScreenshot = document.getElementById("debug-screenshot");
       const debugScreenshotLink = document.getElementById("debug-screenshot-link");
-      const debugScreenshotImage = document.getElementById("debug-screenshot-image");
+      const debugSegmentGallery = document.getElementById("debug-segment-gallery");
       const visionDebugBox = document.getElementById("vision-debug-box");
+
+      function applyDiagnostics(diagnostics) {
+        debugScreenshotCount.textContent = diagnostics?.screenshot_count ?? "n/a";
+        debugVisionOffers.textContent = diagnostics?.page_vision_offer_count ?? "n/a";
+        debugWorkflow.textContent = diagnostics?.workflow ?? "n/a";
+        debugScreenshot.textContent = diagnostics?.debug_screenshot ?? "n/a";
+        visionDebugBox.textContent = diagnostics?.vision_raw_response ?? "n/a";
+
+        if (diagnostics?.debug_screenshot_url) {
+          debugScreenshotLink.href = diagnostics.debug_screenshot_url;
+          debugScreenshotLink.hidden = false;
+        } else {
+          debugScreenshotLink.hidden = true;
+        }
+
+        debugSegmentGallery.innerHTML = "";
+        const segmentUrls = diagnostics?.debug_screenshot_file_urls ?? [];
+        if (Array.isArray(segmentUrls) && segmentUrls.length > 0) {
+          segmentUrls.forEach((url, index) => {
+            const wrapper = document.createElement("figure");
+            wrapper.className = "debug-segment-card";
+
+            const image = document.createElement("img");
+            image.src = url;
+            image.alt = `Scraper segment ${index + 1}`;
+            image.className = "debug-segment-image";
+
+            const caption = document.createElement("figcaption");
+            caption.className = "debug-segment-caption";
+            caption.textContent = `Segment ${index + 1}`;
+
+            wrapper.appendChild(image);
+            wrapper.appendChild(caption);
+            debugSegmentGallery.appendChild(wrapper);
+          });
+          debugSegmentGallery.hidden = false;
+        } else {
+          debugSegmentGallery.hidden = true;
+        }
+      }
+
+      function extractDiagnostics(data) {
+        return (
+          data?.result?.diagnostics ||
+          data?.detail?.scraper_detail?.detail?.diagnostics ||
+          data?.detail?.diagnostics ||
+          null
+        );
+      }
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -99,9 +148,7 @@
         debugVisionOffers.textContent = "running...";
         debugWorkflow.textContent = "running...";
         debugScreenshot.textContent = "running...";
-        debugScreenshotLink.hidden = true;
-        debugScreenshotImage.hidden = true;
-        debugScreenshotImage.removeAttribute("src");
+        applyDiagnostics(null);
         visionDebugBox.textContent = "Running image analysis...";
 
         const payload = {
@@ -121,26 +168,11 @@
             data = JSON.parse(responseText);
           } catch (parseError) {
             resultBox.textContent = responseText || `Workflow failed: ${parseError}`;
-            debugScreenshotCount.textContent = "n/a";
-            debugVisionOffers.textContent = "n/a";
-            debugWorkflow.textContent = "n/a";
-            debugScreenshot.textContent = "n/a";
-            visionDebugBox.textContent = "n/a";
+            applyDiagnostics(null);
             return;
           }
           resultBox.textContent = JSON.stringify(data, null, 2);
-          const diagnostics = data?.result?.diagnostics ?? {};
-          debugScreenshotCount.textContent = diagnostics.screenshot_count ?? "n/a";
-          debugVisionOffers.textContent = diagnostics.page_vision_offer_count ?? "n/a";
-          debugWorkflow.textContent = diagnostics.workflow ?? "n/a";
-          debugScreenshot.textContent = diagnostics.debug_screenshot ?? "n/a";
-          visionDebugBox.textContent = diagnostics.vision_raw_response ?? "n/a";
-          if (diagnostics.debug_screenshot_url) {
-            debugScreenshotLink.href = diagnostics.debug_screenshot_url;
-            debugScreenshotLink.hidden = false;
-            debugScreenshotImage.src = diagnostics.debug_screenshot_url;
-            debugScreenshotImage.hidden = false;
-          }
+          applyDiagnostics(extractDiagnostics(data));
         } catch (error) {
           resultBox.textContent = `Workflow failed: ${error}`;
           debugScreenshotCount.textContent = "error";
@@ -149,7 +181,8 @@
           debugScreenshot.textContent = "error";
           visionDebugBox.textContent = "error";
           debugScreenshotLink.hidden = true;
-          debugScreenshotImage.hidden = true;
+          debugSegmentGallery.hidden = true;
+          debugSegmentGallery.innerHTML = "";
         }
       });
     </script>

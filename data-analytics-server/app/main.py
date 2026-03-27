@@ -55,6 +55,19 @@ async def submit_job(submission: SubmissionRequest) -> dict[str, object]:
                 detail = exc.response.json()
             except ValueError:
                 detail = exc.response.text
+            diagnostics = None
+            if isinstance(detail, dict):
+                nested_detail = detail.get("detail")
+                if isinstance(nested_detail, dict):
+                    diagnostics = nested_detail.get("diagnostics")
+                    screenshot_path = nested_detail.get("diagnostics", {}).get("debug_screenshot") if isinstance(nested_detail.get("diagnostics"), dict) else None
+                    screenshot_files = nested_detail.get("diagnostics", {}).get("debug_screenshot_files") if isinstance(nested_detail.get("diagnostics"), dict) else []
+                    if isinstance(screenshot_path, str) and screenshot_path:
+                        nested_detail["diagnostics"]["debug_screenshot_url"] = f"/debug-assets/{Path(screenshot_path).name}"
+                    if isinstance(screenshot_files, list):
+                        nested_detail["diagnostics"]["debug_screenshot_file_urls"] = [
+                            f"/debug-assets/{Path(path).name}" for path in screenshot_files if isinstance(path, str) and path
+                        ]
             raise HTTPException(
                 status_code=exc.response.status_code,
                 detail={
