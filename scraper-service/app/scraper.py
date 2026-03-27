@@ -62,6 +62,14 @@ async def _dismiss_common_banners(page) -> None:
 
 async def _accept_cookie_modal(page) -> bool:
     selectors = (
+        'button#accept[data-action="consent"][data-action-type="accept"]',
+        'button.uc-accept-button#accept',
+        '#uc-center-container button:has-text("Akzeptiere alle")',
+        '#uc-center-container button:has-text("Alle akzeptieren")',
+        '#uc-center-container button[data-testid*="accept"]',
+        '[data-testid="uc-accept-all-button"]',
+        '[id^="uc-"] button:has-text("Akzeptiere alle")',
+        '[class*="uc-"] button:has-text("Akzeptiere alle")',
         'button:has-text("Akzeptiere alle")',
         'button:has-text("Alle akzeptieren")',
         'button:has-text("Accept all")',
@@ -77,11 +85,29 @@ async def _accept_cookie_modal(page) -> bool:
             try:
                 button = frame.locator(selector).first
                 if await button.count() and await button.is_visible(timeout=1000):
+                    await button.scroll_into_view_if_needed(timeout=1000)
                     await button.click(timeout=3000, force=True)
                     await page.wait_for_timeout(1500)
                     return True
             except Exception:
                 continue
+
+        try:
+            clicked = await frame.evaluate(
+                """
+                () => {
+                  const exactButton = document.querySelector('button#accept[data-action="consent"][data-action-type="accept"]');
+                  if (!exactButton) return false;
+                  exactButton.click();
+                  return true;
+                }
+                """
+            )
+            if clicked:
+                await page.wait_for_timeout(1500)
+                return True
+        except Exception:
+            continue
 
         try:
             clicked = await frame.evaluate(
@@ -96,6 +122,47 @@ async def _accept_cookie_modal(page) -> bool:
                   if (!target) return false;
                   target.click();
                   return true;
+                }
+                """
+            )
+            if clicked:
+                await page.wait_for_timeout(1500)
+                return True
+        except Exception:
+            continue
+
+        try:
+            clicked = await frame.evaluate(
+                """
+                () => {
+                  const labels = ['akzeptiere alle', 'alle akzeptieren', 'accept all', 'akzeptieren', 'zustimmen'];
+                  const candidates = Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]'));
+                  const visible = candidates.filter((element) => {
+                    const style = window.getComputedStyle(element);
+                    const rect = element.getBoundingClientRect();
+                    return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 40 && rect.height > 20;
+                  });
+
+                  const exactTextMatch = visible.find((element) => {
+                    const text = (element.textContent || element.value || '').trim().toLowerCase();
+                    return labels.some((label) => text === label || text.includes(label));
+                  });
+                  if (exactTextMatch) {
+                    exactTextMatch.click();
+                    return true;
+                  }
+
+                  const greenButton = visible.find((element) => {
+                    const style = window.getComputedStyle(element);
+                    const bg = style.backgroundColor || '';
+                    return /rgb\\((?:\\d+,\\s*){2}\\d+\\)/.test(bg) && /0,\\s*175|34,\\s*197|46,\\s*204|63,\\s*186/i.test(bg);
+                  });
+                  if (greenButton) {
+                    greenButton.click();
+                    return true;
+                  }
+
+                  return false;
                 }
                 """
             )
@@ -230,7 +297,7 @@ async def _prepare_offer_view(page) -> dict[str, object]:
 
 
 async def _load_full_offer_listing(page) -> dict[str, object]:
-    diagnostics: dict[str, object] = {"preload_scroll_steps": 0}
+    diagnostics: dict[str, object] = {"preload_scroll_steps": 0, "scroll_growth_iterations": 0}
     try:
         total_height = await page.evaluate("() => document.body.scrollHeight")
     except Exception:
@@ -238,18 +305,36 @@ async def _load_full_offer_listing(page) -> dict[str, object]:
 
     viewport_height = 1400
     current = 0
-    max_steps = 18
-    while current < total_height and diagnostics["preload_scroll_steps"] < max_steps:
+    stabilized_iterations = 0
+    max_iterations = 120
+    previous_total_height = total_height
+
+    while diagnostics["preload_scroll_steps"] < max_iterations:
         try:
             await page.evaluate("(y) => window.scrollTo(0, y)", current)
-            await page.wait_for_timeout(500)
+            await page.wait_for_timeout(700)
             current += viewport_height
             diagnostics["preload_scroll_steps"] = int(diagnostics["preload_scroll_steps"]) + 1
-            total_height = await page.evaluate("() => document.body.scrollHeight")
+            total_height = await page.evaluate(
+                "() => Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)"
+            )
+            if total_height > previous_total_height:
+                diagnostics["scroll_growth_iterations"] = int(diagnostics["scroll_growth_iterations"]) + 1
+                previous_total_height = total_height
+                stabilized_iterations = 0
+            else:
+                stabilized_iterations += 1
+
+            if current >= total_height:
+                if stabilized_iterations >= 4:
+                    break
+                current = max(0, total_height - viewport_height)
         except Exception:
             break
 
     try:
+        await page.evaluate("(y) => window.scrollTo(0, y)", max(0, total_height - viewport_height))
+        await page.wait_for_timeout(1200)
         await page.evaluate("() => window.scrollTo(0, 0)")
         await page.wait_for_timeout(900)
     except Exception:
