@@ -22,7 +22,7 @@ This repository contains a dockerized multi-service prototype for:
 
 - Receives structured scraping jobs from the Data-Analytics Server
 - Loads pages with Playwright to support JavaScript-rendered content
-- Tries to accept cookie dialogs, close blocking overlays, and switch to the `Angebote` view
+- Tries to accept cookie dialogs, close blocking overlays
 - Scrolls through long offer pages before screenshot capture so lazy-loaded flyer content is included
 - Captures stitched screenshots and splits them into segments
 - Sends screenshot segments to OpenAI Vision for structured offer extraction
