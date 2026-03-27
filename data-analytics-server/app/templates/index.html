@@ -44,15 +44,65 @@
         </div>
         <pre id="result-box">Waiting for submission...</pre>
       </section>
+
+      <section class="panel">
+        <div class="section-header">
+          <h2>Scraper Debug</h2>
+          <p>Key diagnostics from the latest scraper run</p>
+        </div>
+        <div class="debug-grid">
+          <article class="debug-card">
+            <span class="debug-label">screenshot_count</span>
+            <strong id="debug-screenshot-count">n/a</strong>
+          </article>
+          <article class="debug-card">
+            <span class="debug-label">page_vision_offer_count</span>
+            <strong id="debug-vision-offers">n/a</strong>
+          </article>
+          <article class="debug-card">
+            <span class="debug-label">workflow</span>
+            <strong id="debug-workflow">n/a</strong>
+          </article>
+          <article class="debug-card debug-card-wide">
+            <span class="debug-label">debug_screenshot</span>
+            <strong id="debug-screenshot">n/a</strong>
+            <a id="debug-screenshot-link" class="debug-link" href="#" target="_blank" rel="noreferrer" hidden>Open screenshot</a>
+            <img id="debug-screenshot-image" class="debug-image" alt="Scraper debug screenshot" hidden />
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-header">
+          <h2>OpenAI Vision Debug</h2>
+          <p>Raw image-analysis response from the latest screenshot request</p>
+        </div>
+        <pre id="vision-debug-box">Waiting for submission...</pre>
+      </section>
     </main>
 
     <script>
       const form = document.getElementById("scrape-form");
       const resultBox = document.getElementById("result-box");
+      const debugScreenshotCount = document.getElementById("debug-screenshot-count");
+      const debugVisionOffers = document.getElementById("debug-vision-offers");
+      const debugWorkflow = document.getElementById("debug-workflow");
+      const debugScreenshot = document.getElementById("debug-screenshot");
+      const debugScreenshotLink = document.getElementById("debug-screenshot-link");
+      const debugScreenshotImage = document.getElementById("debug-screenshot-image");
+      const visionDebugBox = document.getElementById("vision-debug-box");
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
         resultBox.textContent = "Running scraper workflow...";
+        debugScreenshotCount.textContent = "running...";
+        debugVisionOffers.textContent = "running...";
+        debugWorkflow.textContent = "running...";
+        debugScreenshot.textContent = "running...";
+        debugScreenshotLink.hidden = true;
+        debugScreenshotImage.hidden = true;
+        debugScreenshotImage.removeAttribute("src");
+        visionDebugBox.textContent = "Running image analysis...";
 
         const payload = {
           target_url: document.getElementById("target_url").value,
@@ -67,11 +117,29 @@
           });
           const data = await response.json();
           resultBox.textContent = JSON.stringify(data, null, 2);
+          const diagnostics = data?.result?.diagnostics ?? {};
+          debugScreenshotCount.textContent = diagnostics.screenshot_count ?? "n/a";
+          debugVisionOffers.textContent = diagnostics.page_vision_offer_count ?? "n/a";
+          debugWorkflow.textContent = diagnostics.workflow ?? "n/a";
+          debugScreenshot.textContent = diagnostics.debug_screenshot ?? "n/a";
+          visionDebugBox.textContent = diagnostics.vision_raw_response ?? "n/a";
+          if (diagnostics.debug_screenshot_url) {
+            debugScreenshotLink.href = diagnostics.debug_screenshot_url;
+            debugScreenshotLink.hidden = false;
+            debugScreenshotImage.src = diagnostics.debug_screenshot_url;
+            debugScreenshotImage.hidden = false;
+          }
         } catch (error) {
           resultBox.textContent = `Workflow failed: ${error}`;
+          debugScreenshotCount.textContent = "error";
+          debugVisionOffers.textContent = "error";
+          debugWorkflow.textContent = "error";
+          debugScreenshot.textContent = "error";
+          visionDebugBox.textContent = "error";
+          debugScreenshotLink.hidden = true;
+          debugScreenshotImage.hidden = true;
         }
       });
     </script>
   </body>
 </html>
-

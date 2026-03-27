@@ -130,6 +130,55 @@ pre {
   min-height: 200px;
 }
 
+.debug-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.debug-card {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(24, 42, 61, 0.1);
+  border-radius: 18px;
+  padding: 18px;
+}
+
+.debug-card-wide {
+  grid-column: 1 / -1;
+}
+
+.debug-label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.debug-card strong {
+  display: block;
+  font-size: 1.15rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.debug-link {
+  display: inline-flex;
+  margin-top: 12px;
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.debug-image {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(24, 42, 61, 0.12);
+  background: white;
+}
+
 @media (max-width: 720px) {
   .shell {
     padding: 32px 16px 48px;
@@ -141,5 +190,9 @@ pre {
 
   .section-header {
     display: block;
+  }
+
+  .debug-grid {
+    grid-template-columns: 1fr;
   }
 }

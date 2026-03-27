@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import httpx
@@ -14,6 +15,8 @@ from app.models import ApplicationData, ScrapeResult, SubmissionRequest
 from app.openai_client import generate_scraper_job
 
 BASE_DIR = Path(__file__).resolve().parent
+DEBUG_DIR = Path(os.getenv("SCRAPER_DEBUG_DIR", "/data/scraper-debug"))
+DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title="Data Analytics Server",
@@ -21,6 +24,7 @@ app = FastAPI(
     version="0.1.0",
 )
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+app.mount("/debug-assets", StaticFiles(directory=DEBUG_DIR), name="debug-assets")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
@@ -41,14 +45,43 @@ async def index(request: Request) -> HTMLResponse:
 @app.post("/api/jobs/submit")
 async def submit_job(submission: SubmissionRequest) -> dict[str, object]:
     job = generate_scraper_job(str(submission.target_url), submission.user_prompt)
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=300) as client:
         try:
             response = await client.post(f"{settings.scraper_service_url}/scrape", json=job.model_dump(mode="json"))
             response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail: object
+            try:
+                detail = exc.response.json()
+            except ValueError:
+                detail = exc.response.text
+            raise HTTPException(
+                status_code=exc.response.status_code,
+                detail={
+                    "error": "scraper_failed",
+                    "message": "The scraper could not extract usable content from the target page.",
+                    "scraper_detail": detail,
+                },
+            ) from exc
         except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=f"Scraper service failed: {exc}") from exc
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "error": "scraper_transport_error",
+                    "message": str(exc) or exc.__class__.__name__,
+                    "exception_type": exc.__class__.__name__,
+                },
+            ) from exc
 
     scrape_result = ScrapeResult.model_validate(response.json())
+    screenshot_path = scrape_result.diagnostics.get("debug_screenshot")
+    if isinstance(screenshot_path, str) and screenshot_path:
+        scrape_result.diagnostics["debug_screenshot_url"] = f"/debug-assets/{Path(screenshot_path).name}"
+    screenshot_files = scrape_result.diagnostics.get("debug_screenshot_files", [])
+    if isinstance(screenshot_files, list):
+        scrape_result.diagnostics["debug_screenshot_file_urls"] = [
+            f"/debug-assets/{Path(path).name}" for path in screenshot_files if isinstance(path, str) and path
+        ]
     stored_record = store.store(job, scrape_result)
     return {
         "job": job.model_dump(mode="json"),

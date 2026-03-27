@@ -10,6 +10,7 @@ services:
     ports:
       - "8001:8001"
     volumes:
+      - ./data:/data
       - ./shared:/app/shared
 
   data-analytics-server:
@@ -21,6 +22,7 @@ services:
     environment:
       SCRAPER_SERVICE_URL: http://scraper-service:8001
       MCP_STORE_PATH: /data/mcp_store.json
+      SCRAPER_DEBUG_DIR: /data/scraper-debug
     ports:
       - "8000:8000"
     volumes:
